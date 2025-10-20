@@ -49,9 +49,10 @@ export default function App() {
   const [loadingTable, setLoadingTable] = useState(true);
   const [stats, setStats] = useState<Stats>({ aguardando: 0, em_atendimento: 0, finalizado: 0, fora_expediente: 0 });
   const [chamados, setChamados] = useState<Chamado[]>([]);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [details, setDetails] = useState<DetalheResponse | null>(null);
+  // Modal de detalhes (comentado por enquanto - pode ser implementado futuramente)
+  // const [detailsOpen, setDetailsOpen] = useState(false);
+  // const [detailsLoading, setDetailsLoading] = useState(false);
+  // const [details, setDetails] = useState<DetalheResponse | null>(null);
 
   const [statusFilter, setStatusFilter] = useState('');
   const [expedienteFilter, setExpedienteFilter] = useState('');
@@ -128,27 +129,12 @@ export default function App() {
     }
   };
 
+  // Função de visualizar detalhes (comentada - pode ser implementada futuramente)
   const viewDetails = async (id: string) => {
-    try {
-      setDetailsLoading(true);
-      setDetails(null);
-      setDetailsOpen(true);
-      const res = await fetch(`${API_BASE}/api/chamados/${id}`);
-      if (!res.ok) throw new Error('Falha ao carregar detalhes');
-      const data: DetalheResponse = await res.json();
-      setDetails(data);
-    } catch {
-      show('error', 'Erro ao carregar detalhes');
-    } finally {
-      setDetailsLoading(false);
-    }
+    // Placeholder: apenas mostra alerta por enquanto
+    show('info', `Visualizar chamado ${id} - funcionalidade em desenvolvimento`);
+    console.log('View details for:', id);
   };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDetailsOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   return (
     <div className="p-6 md:p-8 space-y-6 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 min-h-screen">
