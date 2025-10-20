@@ -1,0 +1,403 @@
+// leitor de qr code
+const qrcode = require('qrcode-terminal');
+const { Client, Buttons, List, MessageMedia } = require('whatsapp-web.js'); // Mudança Buttons
+const moment = require('moment-timezone');
+const express = require('express');
+const fs = require('fs');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const { createClient } = require('@supabase/supabase-js');
+
+dotenv.config();
+
+// Configuração do Supabase via variáveis de ambiente
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+    console.error('Variáveis de ambiente SUPABASE_URL e SUPABASE_KEY não definidas.');
+    process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+const PORT = process.env.PORT || 3000;
+
+// Cliente do WhatsApp
+const client = new Client({
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
+    }
+});
+
+// Servidor Express para manter o bot ativo no Render
+app.get('/', (req, res) => {
+    res.send('Bot WhatsApp está ativo! 🤖');
+});
+
+app.get('/status', (req, res) => {
+    res.json({
+        status: 'online',
+        filaAtendimento: filaAtendimento.length,
+        timestamp: new Date()
+    });
+});
+
+// API: listar chamados
+app.get('/api/chamados', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('chamados')
+            .select('*')
+            .order('horario_abertura', { ascending: false });
+
+        if (error) return res.status(500).json({ error: error.message });
+        res.json(data || []);
+    } catch (e) {
+        res.status(500).json({ error: 'Erro interno ao listar chamados' });
+    }
+});
+
+// API: estatísticas agregadas
+app.get('/api/estatisticas', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('chamados')
+            .select('status, dentro_expediente');
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        const stats = {
+            aguardando: 0,
+            em_atendimento: 0,
+            finalizado: 0,
+            fora_expediente: 0
+        };
+
+        (data || []).forEach((c) => {
+            if (c.status === 'aguardando') stats.aguardando++;
+            if (c.status === 'em_atendimento') stats.em_atendimento++;
+            if (c.status === 'finalizado') stats.finalizado++;
+            if (c.dentro_expediente === false) stats.fora_expediente++;
+        });
+
+        res.json(stats);
+    } catch (e) {
+        res.status(500).json({ error: 'Erro interno ao calcular estatísticas' });
+    }
+});
+
+// API: detalhes do chamado (inclui mensagens)
+app.get('/api/chamados/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { data: chamado, error: chamadoError } = await supabase
+            .from('chamados')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (chamadoError) return res.status(404).json({ error: 'Chamado não encontrado' });
+
+        const { data: mensagens, error: mensagensError } = await supabase
+            .from('mensagens_chat')
+            .select('*')
+            .eq('chamado_id', id)
+            .order('timestamp', { ascending: true });
+
+        if (mensagensError) return res.status(500).json({ error: mensagensError.message });
+
+        res.json({ chamado, mensagens: mensagens || [] });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro interno ao buscar detalhes do chamado' });
+    }
+});
+
+// API: finalizar chamado
+app.post('/api/chamados/:id/finalizar', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { error } = await supabase
+            .from('chamados')
+            .update({ status: 'finalizado', horario_finalizacao: new Date().toISOString() })
+            .eq('id', id);
+
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro interno ao finalizar chamado' });
+    }
+});
+
+// API: cancelar chamado
+app.post('/api/chamados/:id/cancelar', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { error } = await supabase
+            .from('chamados')
+            .update({ status: 'cancelado', horario_finalizacao: new Date().toISOString() })
+            .eq('id', id);
+
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Erro interno ao cancelar chamado' });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
+
+// serviço de leitura do qr code
+client.on('qr', qr => {
+    qrcode.generate(qr, {small: true});
+});
+// apos isso ele diz que foi tudo certo
+client.on('ready', () => {
+    console.log('Tudo certo! WhatsApp conectado.');
+});
+// E inicializa tudo 
+client.initialize();
+
+const delay = ms => new Promise(res => setTimeout(res, ms)); // Função que usamos para criar o delay entre uma ação e outra
+
+// Fila de atendimento (temporária)
+let filaAtendimento = [];
+// Map para armazenar ID do chamado por número de telefone
+let chamadosAtivos = new Map();
+
+// Função para verificar se está no horário de expediente
+function verificarHorarioExpediente() {
+    const agora = moment.tz('America/Sao_Paulo');
+    const diaSemana = agora.day(); // 0 = Domingo, 1 = Segunda, ..., 6 = Sábado
+    const hora = agora.hour();
+    const minuto = agora.minute();
+    const horaAtual = hora + minuto / 60;
+
+    // Verifica se é dia de semana (Segunda a Sexta)
+    const isDiaUtil = diaSemana >= 1 && diaSemana <= 5;
+    // Verifica se está dentro do horário (08:00 às 18:00)
+    const isHorarioComercial = horaAtual >= 8 && horaAtual < 18;
+
+    return isDiaUtil && isHorarioComercial;
+}
+
+// Função para criar chamado no Supabase
+async function criarChamado(numeroWhatsapp, nomeContato, dentroExpediente) {
+    try {
+        const posicaoFila = dentroExpediente ? filaAtendimento.length + 1 : null;
+        
+        const { data, error } = await supabase
+            .from('chamados')
+            .insert([
+                {
+                    numero_whatsapp: numeroWhatsapp,
+                    nome_contato: nomeContato,
+                    status: 'aguardando',
+                    dentro_expediente: dentroExpediente,
+                    posicao_fila: posicaoFila,
+                    horario_abertura: new Date().toISOString()
+                }
+            ])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Erro ao criar chamado:', error);
+            return null;
+        }
+
+        console.log('Chamado criado:', data.id);
+        return data;
+    } catch (error) {
+        console.error('Erro ao criar chamado:', error);
+        return null;
+    }
+}
+
+// Função para salvar mensagem no Supabase
+async function salvarMensagem(chamadoId, numeroWhatsapp, mensagem, tipoMensagem = 'recebida') {
+    try {
+        const { data, error } = await supabase
+            .from('mensagens_chat')
+            .insert([
+                {
+                    chamado_id: chamadoId,
+                    numero_whatsapp: numeroWhatsapp,
+                    mensagem: mensagem,
+                    tipo_mensagem: tipoMensagem
+                }
+            ]);
+
+        if (error) {
+            console.error('Erro ao salvar mensagem:', error);
+        }
+    } catch (error) {
+        console.error('Erro ao salvar mensagem:', error);
+    }
+}
+
+// Função para atualizar status do chamado
+async function atualizarStatusChamado(chamadoId, novoStatus) {
+    try {
+        const updateData = { status: novoStatus };
+        
+        if (novoStatus === 'finalizado' || novoStatus === 'cancelado') {
+            updateData.horario_finalizacao = new Date().toISOString();
+        }
+
+        const { data, error } = await supabase
+            .from('chamados')
+            .update(updateData)
+            .eq('id', chamadoId);
+
+        if (error) {
+            console.error('Erro ao atualizar chamado:', error);
+        } else {
+            console.log('Chamado atualizado:', chamadoId, novoStatus);
+        }
+    } catch (error) {
+        console.error('Erro ao atualizar chamado:', error);
+    }
+}
+
+// Função para adicionar à fila
+function adicionarNaFila(numero) {
+    if (!filaAtendimento.includes(numero)) {
+        filaAtendimento.push(numero);
+    }
+    return filaAtendimento.indexOf(numero) + 1;
+}
+
+// Função para remover da fila
+function removerDaFila(numero) {
+    const index = filaAtendimento.indexOf(numero);
+    if (index > -1) {
+        filaAtendimento.splice(index, 1);
+    }
+}
+
+// Funil
+
+client.on('message', async msg => {
+
+    // Menu inicial - disparado ao receber mensagens de saudação
+    if (msg.body.match(/(menu|Opa|Ei|ei|Lucas|Menu|dia|tarde|noite|oi|Oi|Olá|olá|ola|Ola|começar|iniciar)/i) && msg.from.endsWith('@c.us')) {
+
+        const chat = await msg.getChat();
+
+        await delay(2000);
+        await chat.sendStateTyping();
+        await delay(2000);
+        
+        await client.sendMessage(msg.from, 'Olá, seja bem vindo ao nosso atendimento digital!\n\nEscolha uma das opções abaixo para direcionarmos seu atendimento para uma pessoa de nossa equipe.\n\n*1* - Abertura de Chamado - Opening of Support\n\n*#* - Finalizar o chat.');
+    }
+
+    // Opção 1 - Abertura de Chamado
+    if (msg.body === '1' && msg.from.endsWith('@c.us')) {
+        const chat = await msg.getChat();
+        const contact = await msg.getContact();
+        const nomeContato = contact.pushname || 'Sem nome';
+        
+        await delay(2000);
+        await chat.sendStateTyping();
+        await delay(2000);
+
+        // Verifica se está no horário de expediente
+        const noExpediente = verificarHorarioExpediente();
+
+        // Criar chamado no Supabase
+        const chamado = await criarChamado(msg.from, nomeContato, noExpediente);
+
+        if (chamado) {
+            chamadosAtivos.set(msg.from, chamado.id);
+            
+            // Salvar a mensagem do usuário
+            await salvarMensagem(chamado.id, msg.from, '1', 'recebida');
+        }
+
+        if (!noExpediente) {
+            // Fora do horário
+            const mensagem1 = '⏰ Lembramos que nosso horário de expediente é de seg a sex, das 08:00 às 18:00.\n\nSeu chamado será registrado e entraremos em contato assim que possível.';
+            await client.sendMessage(msg.from, mensagem1);
+            
+            if (chamado) await salvarMensagem(chamado.id, msg.from, mensagem1, 'enviada');
+            
+            await delay(2000);
+            await chat.sendStateTyping();
+            await delay(2000);
+            
+            const mensagem2 = 'Obrigado por entrar em contato! Retornaremos em breve. 😊';
+            await client.sendMessage(msg.from, mensagem2);
+            
+            if (chamado) await salvarMensagem(chamado.id, msg.from, mensagem2, 'enviada');
+            
+        } else {
+            // Dentro do horário - adiciona na fila
+            const posicao = adicionarNaFila(msg.from);
+            
+            const mensagem1 = `Aguarde um momento que já iremos atendê-lo! Você é o *${posicao}º* da fila. ⏳`;
+            await client.sendMessage(msg.from, mensagem1);
+            
+            if (chamado) {
+                await salvarMensagem(chamado.id, msg.from, mensagem1, 'enviada');
+                await atualizarStatusChamado(chamado.id, 'em_atendimento');
+            }
+            
+            await delay(2000);
+            await chat.sendStateTyping();
+            await delay(2000);
+            
+            const mensagem2 = 'Em breve um de nossos atendentes entrará em contato com você. 👋';
+            await client.sendMessage(msg.from, mensagem2);
+            
+            if (chamado) await salvarMensagem(chamado.id, msg.from, mensagem2, 'enviada');
+        }
+    }
+
+    // Opção # - Finalizar chat
+    if (msg.body === '#' && msg.from.endsWith('@c.us')) {
+        const chat = await msg.getChat();
+        
+        // Pega o ID do chamado ativo
+        const chamadoId = chamadosAtivos.get(msg.from);
+        
+        // Remove da fila se estiver nela
+        removerDaFila(msg.from);
+        
+        // Atualizar status para finalizado no Supabase
+        if (chamadoId) {
+            await salvarMensagem(chamadoId, msg.from, '#', 'recebida');
+            await atualizarStatusChamado(chamadoId, 'finalizado');
+            chamadosAtivos.delete(msg.from);
+        }
+        
+        await delay(2000);
+        await chat.sendStateTyping();
+        await delay(2000);
+        
+        const mensagemFinal = 'Chat finalizado! Obrigado por entrar em contato. Se precisar de ajuda novamente, é só nos chamar! 😊';
+        await client.sendMessage(msg.from, mensagemFinal);
+        
+        if (chamadoId) {
+            await salvarMensagem(chamadoId, msg.from, mensagemFinal, 'enviada');
+        }
+    }
+
+});
+
+
