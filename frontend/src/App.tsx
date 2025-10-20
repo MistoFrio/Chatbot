@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import './index.css';
 
 const rawBase = (localStorage.getItem('API_BASE_URL') || '').trim();
-const API_BASE = (rawBase ? (rawBase.startsWith('http') ? rawBase : `http://${rawBase}`) : 'http://localhost:3000') as string;
+const API_BASE = (rawBase ? (rawBase.startsWith('http') ? rawBase : `http://${rawBase}`) : 'https://chatbot-whatsapp-ssjm.onrender.com') as string;
 
 type Chamado = {
   id: string;
