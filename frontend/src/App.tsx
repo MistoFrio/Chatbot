@@ -17,8 +17,8 @@ type Chamado = {
 };
 
 type Stats = { aguardando: number; em_atendimento: number; finalizado: number; fora_expediente: number };
-type Mensagem = { id: string; chamado_id: string; numero_whatsapp: string; mensagem: string; tipo_mensagem: string; timestamp: string };
-type DetalheResponse = { chamado: Chamado; mensagens: Mensagem[] };
+// type Mensagem = { id: string; chamado_id: string; numero_whatsapp: string; mensagem: string; tipo_mensagem: string; timestamp: string };
+// type DetalheResponse = { chamado: Chamado; mensagens: Mensagem[] };
 
 function useTheme() {
   const [theme, setTheme] = useState<string>(() => localStorage.getItem('THEME') || 'light');
