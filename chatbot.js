@@ -1,6 +1,6 @@
 // leitor de qr code
 const qrcode = require('qrcode-terminal');
-const { Client, Buttons, List, MessageMedia } = require('whatsapp-web.js'); // Mudança Buttons
+const { Client, LocalAuth, Buttons, List, MessageMedia } = require('whatsapp-web.js'); // Mudança Buttons
 const moment = require('moment-timezone');
 const express = require('express');
 const fs = require('fs');
@@ -28,6 +28,9 @@ const PORT = process.env.PORT || 3000;
 
 // Cliente do WhatsApp
 const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: './.wwebjs_auth'
+    }),
     puppeteer: {
         headless: true,
         args: [
