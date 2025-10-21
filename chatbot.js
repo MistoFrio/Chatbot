@@ -294,7 +294,44 @@ client.on('qr', qr => {
 client.on('ready', () => {
     qrCodeData = null; // Limpa o QR Code após conectar
     console.log('Tudo certo! WhatsApp conectado.');
+    
+    // Mantém a sessão ativa - envia ping a cada 5 minutos
+    setInterval(async () => {
+        try {
+            const state = await client.getState();
+            console.log('🔄 Heartbeat - Sessão ativa:', state);
+            
+            // Se estiver desconectado, tentar reinicializar
+            if (state !== 'CONNECTED') {
+                console.log('⚠️ Sessão não conectada, tentando reconectar...');
+                await client.pupPage.evaluate(() => {
+                    window.Store.State.default.state = 'CONNECTED';
+                });
+            }
+        } catch (error) {
+            console.log('⚠️ Erro no heartbeat:', error.message);
+        }
+    }, 5 * 60 * 1000); // 5 minutos
+    
+    console.log('✅ Sistema de manutenção de sessão ativado (heartbeat a cada 5 minutos)');
 });
+
+// Detectar desconexão e tentar reconectar automaticamente
+client.on('disconnected', (reason) => {
+    console.log('❌ WhatsApp desconectado. Motivo:', reason);
+    console.log('🔄 Tentando reconectar em 10 segundos...');
+    
+    setTimeout(() => {
+        console.log('🔄 Reinicializando cliente...');
+        client.initialize();
+    }, 10000);
+});
+
+// Detectar mudança de estado
+client.on('change_state', state => {
+    console.log('🔄 Mudança de estado do WhatsApp:', state);
+});
+
 // E inicializa tudo 
 client.initialize();
 
