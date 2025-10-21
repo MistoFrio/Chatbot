@@ -301,19 +301,33 @@ client.on('ready', () => {
             const state = await client.getState();
             console.log('🔄 Heartbeat - Sessão ativa:', state);
             
-            // Se estiver desconectado, tentar reinicializar
+            // Apenas loga o estado, não tenta forçar reconexão
+            // O evento 'disconnected' cuida da reconexão automática
             if (state !== 'CONNECTED') {
-                console.log('⚠️ Sessão não conectada, tentando reconectar...');
-                await client.pupPage.evaluate(() => {
-                    window.Store.State.default.state = 'CONNECTED';
-                });
+                console.log('⚠️ Sessão em estado:', state, '- Aguardando reconexão automática...');
             }
         } catch (error) {
-            console.log('⚠️ Erro no heartbeat:', error.message);
+            console.log('⚠️ Erro no heartbeat (normal se estiver reconectando):', error.message);
         }
     }, 5 * 60 * 1000); // 5 minutos
     
-    console.log('✅ Sistema de manutenção de sessão ativado (heartbeat a cada 5 minutos)');
+    // Ping ativo para evitar hibernação - a cada 2 minutos
+    setInterval(async () => {
+        try {
+            // Simula atividade para manter sessão ativa
+            await client.pupPage.evaluate(() => {
+                // Apenas verifica se a página está ativa (não consome recursos)
+                return document.hasFocus();
+            });
+            console.log('📡 Ping - Mantendo sessão ativa');
+        } catch (error) {
+            // Ignora erros silenciosamente (normal durante reconexão)
+        }
+    }, 2 * 60 * 1000); // 2 minutos
+    
+    console.log('✅ Sistema de manutenção de sessão ativado');
+    console.log('   - Heartbeat: a cada 5 minutos');
+    console.log('   - Ping anti-hibernação: a cada 2 minutos');
 });
 
 // Detectar desconexão e tentar reconectar automaticamente
