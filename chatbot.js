@@ -416,12 +416,35 @@ function removerDaFila(numero) {
     }
 }
 
+// Controle de tempo para mensagem de boas-vindas (10 minutos)
+const ultimaMensagemBoasVindas = new Map(); // Armazena: número => timestamp
+const TEMPO_COOLDOWN = 10 * 60 * 1000; // 10 minutos em milissegundos
+
+function podeEnviarBoasVindas(numero) {
+    const agora = Date.now();
+    const ultimoEnvio = ultimaMensagemBoasVindas.get(numero);
+    
+    // Se nunca enviou ou já passou 10 minutos
+    if (!ultimoEnvio || (agora - ultimoEnvio) >= TEMPO_COOLDOWN) {
+        ultimaMensagemBoasVindas.set(numero, agora);
+        return true;
+    }
+    
+    return false;
+}
+
 // Funil
 
 client.on('message', async msg => {
 
     // Menu inicial - disparado ao receber mensagens de saudação
     if (msg.body.match(/(menu|Opa|Ei|ei|Lucas|Menu|dia|tarde|noite|oi|Oi|Olá|olá|ola|Ola|começar|iniciar)/i) && msg.from.endsWith('@c.us')) {
+
+        // Verifica se pode enviar mensagem de boas-vindas
+        if (!podeEnviarBoasVindas(msg.from)) {
+            console.log(`Boas-vindas bloqueadas para ${msg.from} - aguardar 10 minutos`);
+            return; // Não envia nada se não passou 10 minutos
+        }
 
         const chat = await msg.getChat();
         const contact = await msg.getContact();
